@@ -28,6 +28,8 @@ natively for iOS and Android via Capacitor.
   fill, error check with restore-to-last-correct
 - Import/export puzzles as 81-character strings — every import is rated
 - **Shareable links**: `sudokui.app/#p=<81 chars>` opens the exact puzzle
+- **Classic and Diagonal Sudoku**: diagonal puzzles require 1–9 exactly once
+  on both marked diagonals, with variant-aware solving, generation and sharing
 
 **Learn**
 - Progressive hints: first the technique name, then the full explanation with
@@ -191,7 +193,7 @@ Toward the best open-source sudoku tool anywhere:
 - **Accessibility & i18n** — full screen-reader support, colour-blind-safe
   palettes, translated UI and hint text
 - **Native builds** — ship the Capacitor iOS/Android wrappers to the stores
-- **Variants** — Killer, X-Sudoku, Chaos/irregular boxes (engine units are
+- **More variants** — Killer and Chaos/irregular boxes (engine units are
   already abstracted as cell lists)
 
 ## Credits & license
