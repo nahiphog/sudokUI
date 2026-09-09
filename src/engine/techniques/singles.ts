@@ -1,4 +1,4 @@
-import { Grid, UNITS, bit, digitsOf, cellName, popcount } from '../board';
+import { Grid, unitsFor, bit, digitsOf, cellName, popcount } from '../board';
 import { Step } from '../steps';
 
 /**
@@ -12,14 +12,17 @@ import { Step } from '../steps';
 const UNIT_NAMES = [
   ...Array.from({ length: 9 }, (_, i) => `row ${i + 1}`),
   ...Array.from({ length: 9 }, (_, i) => `column ${i + 1}`),
-  ...Array.from({ length: 9 }, (_, i) => `box ${i + 1}`)
+  ...Array.from({ length: 9 }, (_, i) => `box ${i + 1}`),
+  'main diagonal',
+  'anti-diagonal'
 ];
 
 export function findFullHouse(g: Grid): Step | null {
-  for (let u = 0; u < 27; u++) {
+  const units = unitsFor(g.variant);
+  for (let u = 0; u < units.length; u++) {
     let empty = -1;
     let count = 0;
-    for (const cell of UNITS[u]) {
+    for (const cell of units[u]) {
       if (g.values[cell] === 0) {
         empty = cell;
         count++;
@@ -56,12 +59,13 @@ export function findNakedSingle(g: Grid): Step | null {
 }
 
 export function findHiddenSingle(g: Grid): Step | null {
-  for (let u = 0; u < 27; u++) {
+  const units = unitsFor(g.variant);
+  for (let u = 0; u < units.length; u++) {
     for (let d = 1; d <= 9; d++) {
       const b = bit(d);
       let pos = -1;
       let count = 0;
-      for (const cell of UNITS[u]) {
+      for (const cell of units[u]) {
         if (g.values[cell] === 0 && g.cands[cell] & b) {
           pos = cell;
           count++;

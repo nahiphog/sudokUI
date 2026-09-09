@@ -60,4 +60,9 @@ describe('position links', () => {
     // flipping the version nibble must invalidate it
     expect(decodePosition('z' + good.slice(1))).toBeNull();
   });
+
+  it('preserves the diagonal variant', () => {
+    const decoded = decodePosition(encodePosition(fuzzedCells(11), false, 'diagonal'))!;
+    expect(decoded.variant).toBe('diagonal');
+  });
 });

@@ -2,8 +2,9 @@
 // difficulty level and per technique so new games / practice start instantly.
 import { Level, Tech } from '../engine/ratings';
 import type { PoolEntry, WorkerRequest, WorkerResponse } from '../engine/worker';
+import type { SudokuVariant } from '../engine/board';
 
-const STORAGE_KEY = 'sudokui-pools-v10'; // v10: eight difficulty bands
+const STORAGE_KEY = 'sudokui-pools-v11'; // v11: variant-specific pools
 const POOL_CAP = 8;
 
 type Pools = Record<string, PoolEntry[]>;
@@ -24,12 +25,13 @@ function save(pools: Pools) {
   }
 }
 
-export const levelKey = (level: Level) => `level:${level}`;
-export const techKey = (tech: Tech) => `tech:${tech}`;
+export const levelKey = (level: Level, variant: SudokuVariant = 'classic') => `${variant}:level:${level}`;
+export const techKey = (tech: Tech, variant: SudokuVariant = 'classic') => `${variant}:tech:${tech}`;
 
 export function filePoolEntry(entry: PoolEntry) {
   const pools = load();
-  const keys = [levelKey(entry.level), ...entry.techs.map(techKey)];
+  const variant = entry.variant ?? 'classic';
+  const keys = [levelKey(entry.level, variant), ...entry.techs.map((tech) => techKey(tech, variant))];
   for (const key of keys) {
     const pool = pools[key] ?? [];
     if (pool.some((p) => p.puzzle === entry.puzzle)) continue;
@@ -78,7 +80,7 @@ export interface GenerationHandle {
  * the attempt budget ran out or the request was cancelled.
  */
 export function requestPuzzle(
-  req: { kind: 'level'; level: Level } | { kind: 'tech'; tech: Tech },
+  req: { kind: 'level'; level: Level; variant?: SudokuVariant } | { kind: 'tech'; tech: Tech; variant?: SudokuVariant },
   onProgress?: (attempts: number) => void
 ): { promise: Promise<PoolEntry | null>; handle: GenerationHandle } {
   const w = getWorker();

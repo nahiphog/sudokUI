@@ -16,6 +16,7 @@ import { findAllSteps } from '../engine/humanSolver';
 import { Step } from '../engine/steps';
 import { Level, LEVELS, Tech, TECHS, PRACTICE_TECHS, ALL_TECHS, Category } from '../engine/ratings';
 import { requestPuzzle, takePoolEntry, levelKey, techKey, poolSize, filePoolEntry, GenerationHandle } from '../state/pools';
+import { SudokuVariant } from '../engine/board';
 
 interface GenState {
   label: string;
@@ -27,13 +28,20 @@ export function useNewGame() {
   const startGame = useGame((s) => s.startGame);
   const [genState, setGenState] = useState<GenState | null>(null);
 
-  const start = async (req: { kind: 'level'; level: Level } | { kind: 'tech'; tech: Tech }) => {
-    const key = req.kind === 'level' ? levelKey(req.level) : techKey(req.tech);
+  const start = async (
+    req:
+      | { kind: 'level'; level: Level; variant?: SudokuVariant }
+      | { kind: 'tech'; tech: Tech; variant?: SudokuVariant }
+  ) => {
+    const variant = req.variant ?? 'classic';
+    const key = req.kind === 'level' ? levelKey(req.level, variant) : techKey(req.tech, variant);
     const label =
-      req.kind === 'level' ? `${req.level} puzzle` : TECHS[req.tech].name + ' practice';
+      req.kind === 'level'
+        ? `${variant === 'diagonal' ? 'Diagonal ' : ''}${req.level} puzzle`
+        : TECHS[req.tech].name + ' practice';
     const pooled = takePoolEntry(key);
     if (pooled) {
-      startGame(pooled.puzzle, pooled.score, pooled.level, req.kind === 'tech' ? req.tech : null);
+      startGame(pooled.puzzle, pooled.score, pooled.level, req.kind === 'tech' ? req.tech : null, variant);
       // top up the pool in the background
       if (poolSize(key) < 2) {
         const { promise } = requestPuzzle(req);
@@ -48,7 +56,7 @@ export function useNewGame() {
     const entry = await promise;
     setGenState(null);
     if (entry) {
-      startGame(entry.puzzle, entry.score, entry.level, req.kind === 'tech' ? req.tech : null);
+      startGame(entry.puzzle, entry.score, entry.level, req.kind === 'tech' ? req.tech : null, variant);
       return true;
     }
     return false;
@@ -75,23 +83,35 @@ export function NewGameDialog({
   onDaily
 }: {
   onClose: () => void;
-  onStart: (level: Level) => void;
-  onCustom: () => void;
+  onStart: (level: Level, variant: SudokuVariant) => void;
+  onCustom: (variant: SudokuVariant) => void;
   onDaily: () => void;
 }) {
+  const [variant, setVariant] = useState<SudokuVariant>('classic');
   return (
     <Modal title="New game" onClose={onClose}>
+      <div className="variant-switch" role="group" aria-label="Sudoku variant">
+        <button className={variant === 'classic' ? 'active' : ''} onClick={() => setVariant('classic')}>
+          Classic
+        </button>
+        <button className={variant === 'diagonal' ? 'active' : ''} onClick={() => setVariant('diagonal')}>
+          Diagonal
+        </button>
+      </div>
+      {variant === 'diagonal' && (
+        <p className="dialog-note">Digits 1–9 must also appear exactly once on each marked diagonal.</p>
+      )}
       <div className="level-list">
-        <button className="level-btn daily" onClick={onDaily}>
+        {variant === 'classic' && <button className="level-btn daily" onClick={onDaily}>
           <strong>Daily puzzle</strong>
           <span>
             One shared puzzle per day. Everyone in the world gets this exact
             board today, so compare times with your friends
           </span>
-        </button>
+        </button>}
         <button
           className="level-btn surprise"
-          onClick={() => onStart(LEVELS[Math.floor(Math.random() * LEVELS.length)])}
+          onClick={() => onStart(LEVELS[Math.floor(Math.random() * LEVELS.length)], variant)}
         >
           <strong>Surprise me</strong>
           <span>
@@ -103,13 +123,13 @@ export function NewGameDialog({
           <button
             key={level}
             className={`level-btn level-${level.toLowerCase()}`}
-            onClick={() => onStart(level)}
+            onClick={() => onStart(level, variant)}
           >
             <strong>{level}</strong>
             <span>{LEVEL_DESCRIPTIONS[level]}</span>
           </button>
         ))}
-        <button className="level-btn" onClick={onCustom}>
+        <button className="level-btn" onClick={() => onCustom(variant)}>
           <strong>Custom</strong>
           <span>
             Type in a puzzle from a newspaper or book. sudokUI checks it has
@@ -223,9 +243,9 @@ export function SolutionPathDialog({ onClose }: { onClose: () => void }) {
     if (!info) return;
     markAssisted(); // seeing the path (even its shape) is assistance
     // defer the (possibly slow) rating so the dialog paints first
-    const t = setTimeout(() => setSteps(solvePath(info.puzzle)), 30);
+    const t = setTimeout(() => setSteps(solvePath(info.puzzle, info.variant ?? 'classic')), 30);
     return () => clearTimeout(t);
-  }, [info?.puzzle]);
+  }, [info?.puzzle, info?.variant]);
 
   if (!info) return null;
 
@@ -398,7 +418,7 @@ export function ScanDialog({ onClose }: { onClose: () => void }) {
       }
       // scan from the declared candidates; a step the marks faked (one that
       // would contradict the solution) is silently dropped, never listed
-      const all = findAllSteps(contractGrid(cells, auto, contract)).filter(
+      const all = findAllSteps(contractGrid(cells, auto, contract, useGame.getState().info?.variant ?? 'classic')).filter(
         (st) => !solution || stepMatchesSolution(st, solution)
       );
       setSteps(all);
@@ -472,6 +492,7 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
   const startGame = useGame((s) => s.startGame);
   const [text, setText] = useState('');
   const [error, setError] = useState('');
+  const [variant, setVariant] = useState<SudokuVariant>('classic');
 
   const doImport = () => {
     const cleaned = text.replace(/[^0-9.]/g, '');
@@ -479,18 +500,22 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
       setError('A puzzle needs exactly 81 characters (digits and dots).');
       return;
     }
-    const v = validatePuzzle(cleaned);
+    const v = validatePuzzle(cleaned, variant);
     if (!v.ok) {
       setError(v.reason);
       return;
     }
-    startGame(cleaned, v.score, v.level);
+    startGame(cleaned, v.score, v.level, null, variant);
     onClose();
   };
 
   return (
     <Modal title="Import a puzzle" onClose={onClose}>
       <p className="dialog-note">Paste an 81-character puzzle string (dots or zeros for empty cells).</p>
+      <div className="variant-switch" role="group" aria-label="Sudoku variant">
+        <button className={variant === 'classic' ? 'active' : ''} onClick={() => setVariant('classic')}>Classic</button>
+        <button className={variant === 'diagonal' ? 'active' : ''} onClick={() => setVariant('diagonal')}>Diagonal</button>
+      </div>
       <textarea
         rows={3}
         value={text}
@@ -511,6 +536,7 @@ export function ImportDialog({ onClose }: { onClose: () => void }) {
 export function ShareDialog({ onClose }: { onClose: () => void }) {
   const cells = useGame((s) => s.cells);
   const autoCandidates = useGame((s) => s.autoCandidates);
+  const variant = useGame((s) => s.info?.variant ?? 'classic');
   const [copied, setCopied] = useState('');
 
   const currentAsString = () =>
@@ -519,10 +545,11 @@ export function ShareDialog({ onClose }: { onClose: () => void }) {
   const base = () => `${window.location.origin}${window.location.pathname}`;
   // the puzzle string doubles as the seed: anyone opening this link plays
   // the exact same game
-  const shareLink = () => `${base()}#p=${currentAsString()}`;
+  const variantParam = () => (variant === 'diagonal' ? '&v=diagonal' : '');
+  const shareLink = () => `${base()}#p=${currentAsString()}${variantParam()}`;
   // the position link additionally carries every entry, pencil mark,
   // exclusion and colour — the recipient continues exactly where you are
-  const positionLink = () => `${base()}#s=${encodePosition(cells, autoCandidates)}`;
+  const positionLink = () => `${base()}#s=${encodePosition(cells, autoCandidates, variant)}`;
 
   const copy = (what: 'link' | 'position' | 'string') => {
     navigator.clipboard?.writeText(

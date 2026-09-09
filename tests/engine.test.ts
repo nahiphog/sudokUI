@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseGrid, gridToString, emptyGrid, setValue } from '../src/engine/board';
+import { parseGrid, gridToString, emptyGrid, setValue, bit, DIAGONAL_UNITS } from '../src/engine/board';
 import { countSolutions, solve, hasUniqueSolution } from '../src/engine/bruteForce';
 import { generatePuzzle, generateFullGrid, generateWhere, matchesLevel } from '../src/engine/generator';
 import { ratePuzzle, findNextStep, applyStep } from '../src/engine/humanSolver';
@@ -124,6 +124,34 @@ describe('generator', () => {
   });
 });
 
+describe('diagonal Sudoku', () => {
+  it('adds both diagonals to candidate propagation without changing classic Sudoku', () => {
+    const classic = emptyGrid();
+    const diagonal = emptyGrid('diagonal');
+    setValue(classic, 0, 7);
+    setValue(diagonal, 0, 7);
+
+    expect(classic.cands[40] & bit(7)).not.toBe(0);
+    expect(diagonal.cands[40] & bit(7)).toBe(0);
+    expect(diagonal.cands[73] & bit(7)).not.toBe(0);
+  });
+
+  it('generates a valid, uniquely solvable diagonal puzzle', () => {
+    const full = generateFullGrid(Math.random, 'diagonal');
+    for (const unit of DIAGONAL_UNITS) {
+      expect(new Set(unit.map((cell) => full.values[cell])).size).toBe(9);
+    }
+
+    const puzzle = generatePuzzle('rotational', 'diagonal');
+    expect(puzzle.variant).toBe('diagonal');
+    expect(countSolutions(puzzle, 2)).toBe(1);
+    const solved = solve(puzzle)!;
+    for (const unit of DIAGONAL_UNITS) {
+      expect(new Set(unit.map((cell) => solved.values[cell])).size).toBe(9);
+    }
+  });
+});
+
 describe('validatePuzzle (import & custom entry pre-play check)', async () => {
   const { validatePuzzle } = await import('../src/state/gameStore');
 
@@ -143,6 +171,15 @@ describe('validatePuzzle (import & custom entry pre-play check)', async () => {
     const v = validatePuzzle(('11'.padEnd(17, '2') + '3').padEnd(81, '.'));
     expect(v.ok).toBe(false);
     if (!v.ok) expect(v.reason).toContain('Conflicting');
+  });
+
+  it('rejects a duplicate that conflicts only on a diagonal', () => {
+    const chars = Array(81).fill('.');
+    chars[0] = '1';
+    chars[40] = '1';
+    const v = validatePuzzle(chars.join(''), 'diagonal');
+    expect(v.ok).toBe(false);
+    if (!v.ok) expect(v.reason).toContain('diagonal');
   });
 
   it('rejects multi-solution puzzles', () => {

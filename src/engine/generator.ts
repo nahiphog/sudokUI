@@ -1,4 +1,4 @@
-import { Grid, emptyGrid, cloneGrid, setValue, gridToString, parseGrid, digitsOf } from './board';
+import { Grid, SudokuVariant, emptyGrid, cloneGrid, setValue, gridToString, parseGrid, digitsOf } from './board';
 import { countSolutions } from './bruteForce';
 import { ratePuzzle, Rating } from './humanSolver';
 import { Level, Tech, TECHS } from './ratings';
@@ -14,8 +14,11 @@ function shuffle<T>(arr: T[], rnd: () => number = Math.random): T[] {
 }
 
 /** Generate a random completed grid. */
-export function generateFullGrid(rnd: () => number = Math.random): Grid {
-  const g = emptyGrid();
+export function generateFullGrid(
+  rnd: () => number = Math.random,
+  variant: SudokuVariant = 'classic'
+): Grid {
+  const g = emptyGrid(variant);
   const rec = (grid: Grid): Grid | null => {
     let best = -1;
     let bestCount = 10;
@@ -52,11 +55,16 @@ function partners(cell: number, symmetry: Symmetry): number[] {
 }
 
 /** Dig holes from a full grid, keeping the solution unique. */
-export function generatePuzzle(symmetry: Symmetry = 'rotational'): Grid {
-  const full = generateFullGrid();
+export function generatePuzzle(
+  symmetry: Symmetry = 'rotational',
+  variant: SudokuVariant = 'classic',
+  minClues = 0
+): Grid {
+  const full = generateFullGrid(Math.random, variant);
   const puzzle = cloneGrid(full);
   const order = shuffle(Array.from({ length: 81 }, (_, i) => i));
   const removed = new Set<number>();
+  let remaining = 81;
   for (const cell of order) {
     if (removed.has(cell)) continue;
     const group = [cell, ...partners(cell, symmetry).filter((p) => p !== cell)];
@@ -66,14 +74,17 @@ export function generatePuzzle(symmetry: Symmetry = 'rotational'): Grid {
       gridToString(puzzle)
         .split('')
         .map((ch, i) => (group.includes(i) ? '.' : ch))
-        .join('')
+        .join(''),
+      variant
     )!;
     if (countSolutions(test, 2) === 1) {
       for (const c of group) removed.add(c);
+      remaining -= group.length;
       // rebuild puzzle grid without the removed cells
       puzzle.values = test.values;
       puzzle.cands = test.cands;
       puzzle.given = test.given;
+      if (remaining <= minClues) break;
     }
   }
   return puzzle;
@@ -91,10 +102,11 @@ export interface GeneratedPuzzle {
 export function generateWhere(
   match: (rating: Rating) => boolean,
   maxAttempts = 200,
-  onCandidate?: (p: GeneratedPuzzle) => void
+  onCandidate?: (p: GeneratedPuzzle) => void,
+  variant: SudokuVariant = 'classic'
 ): GeneratedPuzzle | null {
   for (let i = 0; i < maxAttempts; i++) {
-    const puzzle = generatePuzzle(Math.random() < 0.7 ? 'rotational' : 'none');
+    const puzzle = generatePuzzle(Math.random() < 0.7 ? 'rotational' : 'none', variant);
     const rating = ratePuzzle(puzzle);
     if (!rating) continue;
     const result = { puzzle: gridToString(puzzle), rating };

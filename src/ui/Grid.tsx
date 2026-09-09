@@ -6,7 +6,7 @@
 import React, { useRef } from 'react';
 import { useGame, engineGrid } from '../state/gameStore';
 import { useSettings } from '../state/settings';
-import { bit, digitsOf } from '../engine/board';
+import { bit, digitsOf, peersFor } from '../engine/board';
 import { ChainLink, CellDigit } from '../engine/steps';
 
 const SIZE = 100;
@@ -342,6 +342,7 @@ export function Grid() {
   const errors = useGame((s) => s.errors);
   const paused = useGame((s) => s.paused);
   const won = useGame((s) => s.won);
+  const variant = useGame((s) => s.info?.variant ?? s.customVariant);
   const togglePause = useGame((s) => s.togglePause);
   const { highlightPeers, highlightSameDigit, showPoodle, frameHighlights } = useSettings();
 
@@ -356,8 +357,8 @@ export function Grid() {
     [paused]
   );
   const canonical = React.useMemo(
-    () => (autoCandidates ? engineGrid(cells) : null),
-    [cells, autoCandidates]
+    () => (autoCandidates ? engineGrid(cells, variant) : null),
+    [cells, autoCandidates, variant]
   );
 
   const selSet = new Set(selection);
@@ -372,15 +373,7 @@ export function Grid() {
   const peerSet = new Set<number>();
   if (highlightPeers && selection.length === 1) {
     const i = selection[0];
-    const r = Math.floor(i / 9);
-    const c = i % 9;
-    for (let k = 0; k < 9; k++) {
-      peerSet.add(r * 9 + k);
-      peerSet.add(k * 9 + c);
-    }
-    const br = Math.floor(r / 3) * 3;
-    const bc = Math.floor(c / 3) * 3;
-    for (let rr = 0; rr < 3; rr++) for (let cc = 0; cc < 3; cc++) peerSet.add((br + rr) * 9 + bc + cc);
+    for (const peer of peersFor(variant, i)) peerSet.add(peer);
   }
 
   // hint candidate markers: cell -> digit -> kind
@@ -568,6 +561,23 @@ export function Grid() {
             </g>
           );
         })}
+
+        {variant === 'diagonal' && (
+          <g className="diagonal-lines" pointerEvents="none">
+            <line
+              x1={M + SIZE / 2}
+              y1={M + SIZE / 2}
+              x2={M + SIZE * 8.5}
+              y2={M + SIZE * 8.5}
+            />
+            <line
+              x1={M + SIZE * 8.5}
+              y1={M + SIZE / 2}
+              x2={M + SIZE / 2}
+              y2={M + SIZE * 8.5}
+            />
+          </g>
+        )}
 
         {/* content (hidden while paused) */}
         {!paused || won ? (

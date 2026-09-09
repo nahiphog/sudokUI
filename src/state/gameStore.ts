@@ -13,8 +13,9 @@ import {
   parseGrid,
   gridToString,
   bit,
-  PEERS,
-  UNITS
+  SudokuVariant,
+  peersFor,
+  unitsFor
 } from '../engine/board';
 import { solve, countSolutions } from '../engine/bruteForce';
 import { findNextStep, applyStep, ratePuzzle } from '../engine/humanSolver';
@@ -47,8 +48,8 @@ const cloneCells = (cells: CellState[]): CellState[] =>
 
 /** Engine view of the board: placed values + canonical candidates minus
  *  explicit exclusions. */
-export function engineGrid(cells: CellState[]): Grid {
-  const g = emptyGrid();
+export function engineGrid(cells: CellState[], variant: SudokuVariant = 'classic'): Grid {
+  const g = emptyGrid(variant);
   for (let i = 0; i < 81; i++) {
     if (cells[i].value) {
       setValue(g, i, cells[i].value);
@@ -93,9 +94,10 @@ export function hasManualMarks(cells: CellState[]): boolean {
 export function contractGrid(
   cells: CellState[],
   autoCandidates: boolean,
-  contract: MarkContract
+  contract: MarkContract,
+  variant: SudokuVariant = 'classic'
 ): Grid {
-  const g = engineGrid(cells);
+  const g = engineGrid(cells, variant);
   if (autoCandidates || contract !== 'exhaustive') return g;
   for (let i = 0; i < 81; i++) {
     if (cells[i].value) continue;
@@ -141,6 +143,7 @@ export interface GameInfo {
   score: number;
   level: Level;
   practiceTech: Tech | null;
+  variant: SudokuVariant;
 }
 
 /** snapshot of the running game, restored if custom entry is cancelled */
@@ -150,6 +153,7 @@ interface GameBackup {
   autoCandidates: boolean;
   elapsedBefore: number;
   won: boolean;
+  customVariant: SudokuVariant;
 }
 
 interface GameStore {
@@ -157,6 +161,7 @@ interface GameStore {
   cells: CellState[];
   /** true while the user is typing in a custom puzzle */
   custom: boolean;
+  customVariant: SudokuVariant;
   customBackup: GameBackup | null;
   selection: number[];
   mode: EntryMode;
@@ -188,9 +193,9 @@ interface GameStore {
   /** history index of the last error-free position, set by check() */
   revertIndex: number | null;
 
-  startGame: (puzzle: string, score: number, level: Level, practiceTech?: Tech | null) => void;
+  startGame: (puzzle: string, score: number, level: Level, practiceTech?: Tech | null, variant?: SudokuVariant) => void;
   /** blank board the user types givens onto; the running game is backed up */
-  startCustomEntry: () => void;
+  startCustomEntry: (variant?: SudokuVariant) => void;
   cancelCustomEntry: () => void;
   /** validate + rate the entered givens and start playing; returns an error
    *  message instead when the puzzle is not a proper sudoku */
@@ -251,6 +256,7 @@ export const useGame = create<GameStore>()(
       info: null,
       cells: Array.from({ length: 81 }, emptyCell),
       custom: false,
+      customVariant: 'classic' as SudokuVariant,
       customBackup: null as GameBackup | null,
       selection: [],
       mode: 'digit' as EntryMode,
@@ -272,8 +278,8 @@ export const useGame = create<GameStore>()(
       notice: null,
       revertIndex: null as number | null,
 
-      startGame: (puzzle, score, level, practiceTech = null) => {
-        const g = parseGrid(puzzle);
+      startGame: (puzzle, score, level, practiceTech = null, variant = 'classic') => {
+        const g = parseGrid(puzzle, variant);
         if (!g) return;
         const solved = solve(g);
         if (!solved) return;
@@ -291,7 +297,7 @@ export const useGame = create<GameStore>()(
         // the very start — see Settings)
         const fastForward = practiceTech && useSettings.getState().practiceFastForward;
         if (fastForward) {
-          const eg = engineGrid(cells);
+          const eg = engineGrid(cells, variant);
           for (let guard = 0; guard < 200; guard++) {
             const step = findNextStep(eg);
             if (!step || step.tech === practiceTech) break;
@@ -310,7 +316,8 @@ export const useGame = create<GameStore>()(
             solution: gridToString(solved),
             score,
             level,
-            practiceTech
+            practiceTech,
+            variant
           },
           custom: false,
           customBackup: null,
@@ -345,11 +352,11 @@ export const useGame = create<GameStore>()(
       restart: () => {
         const s = get();
         if (!s.info) return;
-        get().startGame(s.info.puzzle, s.info.score, s.info.level, s.info.practiceTech);
+        get().startGame(s.info.puzzle, s.info.score, s.info.level, s.info.practiceTech, s.info.variant ?? 'classic');
         set({ notice: 'Puzzle restarted' });
       },
 
-      startCustomEntry: () => {
+      startCustomEntry: (variant = 'classic') => {
         const s = get();
         set({
           customBackup: {
@@ -357,9 +364,11 @@ export const useGame = create<GameStore>()(
             cells: cloneCells(s.cells),
             autoCandidates: s.autoCandidates,
             elapsedBefore: s.elapsedMs(),
-            won: s.won
+            won: s.won,
+            customVariant: s.customVariant
           },
           custom: true,
+          customVariant: variant,
           info: null,
           cells: Array.from({ length: 81 }, emptyCell),
           selection: [],
@@ -381,6 +390,7 @@ export const useGame = create<GameStore>()(
         const b = get().customBackup;
         set({
           custom: false,
+          customVariant: b?.customVariant ?? 'classic',
           customBackup: null,
           info: b?.info ?? null,
           cells: b?.cells ?? Array.from({ length: 81 }, emptyCell),
@@ -401,10 +411,10 @@ export const useGame = create<GameStore>()(
       finishCustomEntry: () => {
         const s = get();
         const puzzle = s.cells.map((c) => (c.value ? String(c.value) : '.')).join('');
-        const v = validatePuzzle(puzzle);
+        const v = validatePuzzle(puzzle, s.customVariant);
         if (!v.ok) return v.reason;
         set({ custom: false, customBackup: null });
-        get().startGame(puzzle, v.score, v.level);
+        get().startGame(puzzle, v.score, v.level, null, s.customVariant);
         set({ notice: `Puzzle checked: unique solution, rated ${v.score} (${v.level})` });
         return null;
       },
@@ -453,7 +463,7 @@ export const useGame = create<GameStore>()(
               cells[i].center = 0;
               changed = true;
               // clear this digit from pencilmarks of peers
-              for (const p of PEERS[i]) {
+              for (const p of peersFor(s.info?.variant ?? s.customVariant, i)) {
                 cells[p].corner &= ~bit(digit);
                 cells[p].center &= ~bit(digit);
               }
@@ -464,7 +474,7 @@ export const useGame = create<GameStore>()(
           if (s.autoCandidates) {
             // auto mode: pencil input strikes a candidate through (exclusion),
             // pressing again restores it
-            const eg = engineGrid(cells);
+            const eg = engineGrid(cells, s.info?.variant ?? s.customVariant);
             const relevant = editable.filter(
               (i) => eg.cands[i] & bit(digit) || cells[i].excluded & bit(digit)
             );
@@ -655,7 +665,7 @@ export const useGame = create<GameStore>()(
         let notice: string | null = null;
 
         if (!s.autoCandidates) {
-          const eg = engineGrid(cells);
+          const eg = engineGrid(cells, s.info?.variant ?? s.customVariant);
           let adopted = 0;
           let dropped = 0;
           for (let i = 0; i < 81; i++) {
@@ -675,7 +685,7 @@ export const useGame = create<GameStore>()(
         } else {
           const { autoOffMaterialize, materializeLayer } = useSettings.getState();
           if (autoOffMaterialize) {
-            const eg = engineGrid(cells);
+            const eg = engineGrid(cells, s.info?.variant ?? s.customVariant);
             for (let i = 0; i < 81; i++) {
               if (!cells[i].given && !cells[i].value) cells[i][materializeLayer] = eg.cands[i];
             }
@@ -710,7 +720,7 @@ export const useGame = create<GameStore>()(
        */
       fillCandidates: () => {
         const s = get();
-        const g = engineGrid(s.cells);
+        const g = engineGrid(s.cells, s.info?.variant ?? s.customVariant);
         const cells = cloneCells(s.cells);
         const layer = (s.tempMode ?? s.mode) === 'corner' ? 'corner' : 'center';
         const scope = s.selection.filter((i) => !cells[i].given && !cells[i].value);
@@ -799,7 +809,9 @@ export const useGame = create<GameStore>()(
             return;
           }
         }
-        const step = findNextStep(contractGrid(s.cells, s.autoCandidates, s.markContract));
+        const step = findNextStep(
+          contractGrid(s.cells, s.autoCandidates, s.markContract, s.info?.variant ?? s.customVariant)
+        );
         if (step && stepMatchesSolution(step, sol)) {
           // even the technique's name is information — the solve is no
           // longer clean
@@ -844,7 +856,7 @@ export const useGame = create<GameStore>()(
           cells[cell].value = digit;
           cells[cell].corner = 0;
           cells[cell].center = 0;
-          for (const p of PEERS[cell]) {
+          for (const p of peersFor(s.info?.variant ?? s.customVariant, cell)) {
             cells[p].corner &= ~bit(digit);
             cells[p].center &= ~bit(digit);
           }
@@ -871,7 +883,9 @@ export const useGame = create<GameStore>()(
         if (!s.info) return;
         set({ assisted: true });
         const errors: number[] = [];
-        const eg = s.autoCandidates ? engineGrid(s.cells) : null;
+        const eg = s.autoCandidates
+          ? engineGrid(s.cells, s.info?.variant ?? s.customVariant)
+          : null;
         for (let i = 0; i < 81; i++) {
           const sol = Number(s.info.solution[i]);
           const c = s.cells[i];
@@ -935,11 +949,11 @@ export const useGame = create<GameStore>()(
         const givens = decoded.cells
           .map((c) => (c.given ? String(c.value) : '.'))
           .join('');
-        const v = validatePuzzle(givens);
+        const v = validatePuzzle(givens, decoded.variant);
         if (!v.ok) return false;
         // start the underlying game (computes the solution), then overlay
         // the shared progress: entries, marks, exclusions and colours
-        get().startGame(givens, v.score, v.level);
+        get().startGame(givens, v.score, v.level, null, decoded.variant);
         set({
           cells: decoded.cells,
           autoCandidates: decoded.autoCandidates,
@@ -955,7 +969,7 @@ export const useGame = create<GameStore>()(
       jumpToStep: (k) => {
         const s = get();
         if (!s.info) return;
-        const steps = solvePath(s.info.puzzle);
+        const steps = solvePath(s.info.puzzle, s.info.variant ?? 'classic');
         const cells = Array.from({ length: 81 }, (_, i) => {
           const cell = emptyCell();
           const ch = s.info!.puzzle[i];
@@ -968,7 +982,7 @@ export const useGame = create<GameStore>()(
         // replay the path up to (not including) step k, recording placements
         // as entries and eliminations as candidate exclusions — the same
         // mechanics practice fast-forward uses
-        const eg = engineGrid(cells);
+        const eg = engineGrid(cells, s.info.variant ?? 'classic');
         for (let i = 0; i < k && i < steps.length; i++) {
           const step = steps[i];
           applyStep(eg, step);
@@ -1017,6 +1031,7 @@ export const useGame = create<GameStore>()(
         cells: s.cells,
         // an in-progress custom entry survives a reload (its backup doesn't)
         custom: s.custom,
+        customVariant: s.customVariant,
         autoCandidates: s.autoCandidates,
         elapsedBefore: s.elapsedMs(),
         won: s.won,
@@ -1026,6 +1041,8 @@ export const useGame = create<GameStore>()(
       }),
       onRehydrateStorage: () => (state) => {
         if (state) {
+          state.customVariant = state.customVariant ?? 'classic';
+          if (state.info) state.info.variant = state.info.variant ?? 'classic';
           state.startedAt = Date.now();
           state.paused = state.won; // stopped timer for finished games
         }
@@ -1036,13 +1053,13 @@ export const useGame = create<GameStore>()(
 
 // the full solve path of the current puzzle, cached — rating a hard puzzle
 // can take a few hundred milliseconds and the path never changes
-let pathCache: { puzzle: string; steps: Step[] } | null = null;
+let pathCache: { puzzle: string; variant: SudokuVariant; steps: Step[] } | null = null;
 
 /** Ordered list of solver steps from the puzzle's start to its solution. */
-export function solvePath(puzzle: string): Step[] {
-  if (pathCache?.puzzle !== puzzle) {
-    const rating = ratePuzzle(puzzle);
-    pathCache = { puzzle, steps: rating?.steps ?? [] };
+export function solvePath(puzzle: string, variant: SudokuVariant = 'classic'): Step[] {
+  if (pathCache?.puzzle !== puzzle || pathCache.variant !== variant) {
+    const rating = ratePuzzle(parseGrid(puzzle, variant)!);
+    pathCache = { puzzle, variant, steps: rating?.steps ?? [] };
   }
   return pathCache.steps;
 }
@@ -1054,7 +1071,7 @@ export function solvePath(puzzle: string): Step[] {
  * Worst case ≈ 450 characters; messengers handle that fine. */
 
 const B64URL = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
-const SHARE_VERSION = 1;
+const SHARE_VERSION = 2;
 
 class BitWriter {
   private bits: number[] = [];
@@ -1091,9 +1108,14 @@ class BitReader {
 
 /** Pack a position for sharing. Layout per cell: given(1) value(4)
  *  colours(9), plus corner/centre/excluded (9 each) for open cells. */
-export function encodePosition(cells: CellState[], autoCandidates: boolean): string {
+export function encodePosition(
+  cells: CellState[],
+  autoCandidates: boolean,
+  variant: SudokuVariant = 'classic'
+): string {
   const w = new BitWriter();
   w.write(SHARE_VERSION, 4);
+  w.write(variant === 'diagonal' ? 1 : 0, 1);
   w.write(autoCandidates ? 1 : 0, 1);
   for (const c of cells) {
     w.write(c.given ? 1 : 0, 1);
@@ -1113,10 +1135,12 @@ export function encodePosition(cells: CellState[], autoCandidates: boolean): str
 /** Inverse of encodePosition; null for corrupt or foreign payloads. */
 export function decodePosition(
   encoded: string
-): { cells: CellState[]; autoCandidates: boolean } | null {
+): { cells: CellState[]; autoCandidates: boolean; variant: SudokuVariant } | null {
   try {
     const r = new BitReader(encoded);
-    if (r.read(4) !== SHARE_VERSION) return null;
+    const version = r.read(4);
+    if (version !== 1 && version !== SHARE_VERSION) return null;
+    const variant: SudokuVariant = version >= 2 && r.read(1) === 1 ? 'diagonal' : 'classic';
     const autoCandidates = r.read(1) === 1;
     const cells: CellState[] = [];
     for (let i = 0; i < 81; i++) {
@@ -1134,7 +1158,7 @@ export function decodePosition(
       }
       cells.push(cell);
     }
-    return { cells, autoCandidates };
+    return { cells, autoCandidates, variant };
   } catch {
     return null;
   }
@@ -1150,36 +1174,45 @@ export type PuzzleValidation =
  * the import dialog, custom entry and URL seeding. Synchronous — rating a
  * hard puzzle can take a few hundred milliseconds.
  */
-export function validatePuzzle(puzzle: string): PuzzleValidation {
+export function validatePuzzle(
+  puzzle: string,
+  variant: SudokuVariant = 'classic'
+): PuzzleValidation {
   const clues = [...puzzle].filter((ch) => ch >= '1' && ch <= '9').length;
-  if (clues < 17) {
+  if (variant === 'classic' && clues < 17) {
     return {
       ok: false,
       reason: `Only ${clues} given${clues === 1 ? '' : 's'}. A puzzle needs at least 17 to have a unique solution.`
     };
   }
-  for (const unit of UNITS) {
+  for (const unit of unitsFor(variant)) {
     const seen = new Set<string>();
     for (const c of unit) {
       const ch = puzzle[c];
       if (ch < '1' || ch > '9') continue;
-      if (seen.has(ch)) return { ok: false, reason: `Conflicting givens: two ${ch}s share a row, column or box.` };
+      if (seen.has(ch)) {
+        const scope = variant === 'diagonal' ? 'row, column, box or diagonal' : 'row, column or box';
+        return { ok: false, reason: `Conflicting givens: two ${ch}s share a ${scope}.` };
+      }
       seen.add(ch);
     }
   }
-  const g = parseGrid(puzzle);
+  const g = parseGrid(puzzle, variant);
   if (!g) return { ok: false, reason: 'That is not a valid puzzle.' };
   const solutions = countSolutions(g, 2);
   if (solutions === 0) return { ok: false, reason: 'The puzzle has no solution.' };
   if (solutions > 1) return { ok: false, reason: 'The puzzle has more than one solution.' };
-  const rating = ratePuzzle(parseGrid(puzzle)!);
+  const rating = ratePuzzle(g);
   if (!rating) return { ok: false, reason: 'The puzzle could not be rated.' };
   return { ok: true, score: rating.score, level: rating.level };
 }
 
 /** Rate an imported puzzle; null unless it is a proper unique-solution
  *  sudoku. Thin wrapper around `validatePuzzle` for the URL seeding path. */
-export function rateImport(puzzle: string): { score: number; level: Level } | null {
-  const v = validatePuzzle(puzzle);
+export function rateImport(
+  puzzle: string,
+  variant: SudokuVariant = 'classic'
+): { score: number; level: Level } | null {
+  const v = validatePuzzle(puzzle, variant);
   return v.ok ? { score: v.score, level: v.level } : null;
 }

@@ -1,7 +1,6 @@
 import {
   Grid,
-  UNITS,
-  CELL_UNITS,
+  unitsFor,
   bit,
   digitsOf,
   popcount,
@@ -33,9 +32,12 @@ export function combinations<T>(items: T[], k: number): T[][] {
 const SUBSET_NAMES = ['', '', 'Pair', 'Triple', 'Quadruple'];
 
 /** All units (unit indices) containing every cell of `cells`. */
-function sharedUnits(cells: number[]): number[] {
+function sharedUnits(g: Grid, cells: number[]): number[] {
   const [first, ...rest] = cells;
-  return CELL_UNITS[first].filter((u) => rest.every((c) => CELL_UNITS[c].includes(u)));
+  const units = unitsFor(g.variant);
+  return units
+    .map((_, i) => i)
+    .filter((u) => units[u].includes(first) && rest.every((c) => units[u].includes(c)));
 }
 
 /**
@@ -44,8 +46,9 @@ function sharedUnits(cells: number[]): number[] {
  * separately and earlier.
  */
 export function findNakedSubset(g: Grid, size: number, locked: boolean): Step | null {
-  for (let u = 0; u < 27; u++) {
-    const empty = UNITS[u].filter(
+  const allUnits = unitsFor(g.variant);
+  for (let u = 0; u < allUnits.length; u++) {
+    const empty = allUnits[u].filter(
       (c) => g.values[c] === 0 && popcount(g.cands[c]) <= size
     );
     if (empty.length < size) continue;
@@ -53,13 +56,13 @@ export function findNakedSubset(g: Grid, size: number, locked: boolean): Step | 
       let mask = 0;
       for (const c of combo) mask |= g.cands[c];
       if (popcount(mask) !== size) continue;
-      const units = sharedUnits(combo);
+      const units = sharedUnits(g, combo);
       // collect eliminations across all shared units
       const elims: CellDigit[] = [];
       const seen = new Set<string>();
       const unitsWithElims = new Set<number>();
       for (const su of units) {
-        for (const c of UNITS[su]) {
+        for (const c of allUnits[su]) {
           if (combo.includes(c) || g.values[c] !== 0) continue;
           const hits = g.cands[c] & mask;
           if (!hits) continue;
@@ -97,8 +100,9 @@ export function findNakedSubset(g: Grid, size: number, locked: boolean): Step | 
 }
 
 export function findHiddenSubset(g: Grid, size: number): Step | null {
-  for (let u = 0; u < 27; u++) {
-    const empty = UNITS[u].filter((c) => g.values[c] === 0);
+  const allUnits = unitsFor(g.variant);
+  for (let u = 0; u < allUnits.length; u++) {
+    const empty = allUnits[u].filter((c) => g.values[c] === 0);
     if (empty.length <= size) continue; // otherwise it's a naked subset too
     // digits still missing in this unit
     const missing: number[] = [];
@@ -134,5 +138,6 @@ export function findHiddenSubset(g: Grid, size: number): Step | null {
 export function unitName(u: number): string {
   if (u < 9) return `row ${u + 1}`;
   if (u < 18) return `column ${u - 8}`;
-  return `box ${u - 17}`;
+  if (u < 27) return `box ${u - 17}`;
+  return u === 27 ? 'the main diagonal' : 'the anti-diagonal';
 }
