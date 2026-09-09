@@ -3,12 +3,20 @@
 
 export const ALL_CANDS = 0x1ff;
 
+export type SudokuVariant = 'classic' | 'diagonal';
+
 /** units[0..8] rows, units[9..17] cols, units[18..26] boxes */
 export const UNITS: number[][] = [];
 /** for each cell: [rowUnit, colUnit, boxUnit] indices into UNITS */
 export const CELL_UNITS: [number, number, number][] = [];
 /** for each cell: the 20 peers */
 export const PEERS: number[][] = [];
+
+/** The two additional all-different units used by diagonal Sudoku. */
+export const DIAGONAL_UNITS: number[][] = [
+  Array.from({ length: 9 }, (_, i) => i * 10),
+  Array.from({ length: 9 }, (_, i) => (i + 1) * 8)
+];
 
 for (let r = 0; r < 9; r++) UNITS.push(Array.from({ length: 9 }, (_, c) => r * 9 + c));
 for (let c = 0; c < 9; c++) UNITS.push(Array.from({ length: 9 }, (_, r) => r * 9 + c));
@@ -30,6 +38,17 @@ for (let i = 0; i < 81; i++) {
   set.delete(i);
   PEERS.push([...set].sort((a, z) => a - z));
 }
+
+const DIAGONAL_ALL_UNITS = [...UNITS, ...DIAGONAL_UNITS];
+const DIAGONAL_CELL_UNITS = Array.from({ length: 81 }, (_, cell) =>
+  DIAGONAL_ALL_UNITS.filter((unit) => unit.includes(cell))
+);
+const DIAGONAL_PEERS = DIAGONAL_CELL_UNITS.map((cellUnits, cell) => {
+  const peers = new Set<number>();
+  for (const unit of cellUnits) for (const other of unit) peers.add(other);
+  peers.delete(cell);
+  return [...peers].sort((a, b) => a - b);
+});
 
 export const rowOf = (cell: number) => Math.floor(cell / 9);
 export const colOf = (cell: number) => cell % 9;
@@ -65,13 +84,29 @@ export interface Grid {
   cands: Uint16Array; // 81, 9-bit masks; 0 for solved cells
   /** 1 = clue from the original puzzle (avoidable rectangles need this) */
   given: Uint8Array;
+  variant: SudokuVariant;
 }
 
-export function emptyGrid(): Grid {
+export function unitsFor(variant: SudokuVariant): number[][] {
+  return variant === 'diagonal' ? DIAGONAL_ALL_UNITS : UNITS;
+}
+
+export function cellUnitsFor(variant: SudokuVariant, cell: number): number[][] {
+  return variant === 'diagonal'
+    ? DIAGONAL_CELL_UNITS[cell]
+    : CELL_UNITS[cell].map((unit) => UNITS[unit]);
+}
+
+export function peersFor(variant: SudokuVariant, cell: number): number[] {
+  return variant === 'diagonal' ? DIAGONAL_PEERS[cell] : PEERS[cell];
+}
+
+export function emptyGrid(variant: SudokuVariant = 'classic'): Grid {
   const g: Grid = {
     values: new Uint8Array(81),
     cands: new Uint16Array(81),
-    given: new Uint8Array(81)
+    given: new Uint8Array(81),
+    variant
   };
   g.cands.fill(ALL_CANDS);
   return g;
@@ -81,7 +116,8 @@ export function cloneGrid(g: Grid): Grid {
   return {
     values: new Uint8Array(g.values),
     cands: new Uint16Array(g.cands),
-    given: new Uint8Array(g.given)
+    given: new Uint8Array(g.given),
+    variant: g.variant
   };
 }
 
@@ -90,14 +126,14 @@ export function setValue(g: Grid, cell: number, digit: number): void {
   g.values[cell] = digit;
   g.cands[cell] = 0;
   const b = bit(digit);
-  for (const p of PEERS[cell]) g.cands[p] &= ~b;
+  for (const p of peersFor(g.variant, cell)) g.cands[p] &= ~b;
 }
 
 /** Parse an 81-char string ('.', '0' = empty). Returns null if malformed. */
-export function parseGrid(s: string): Grid | null {
+export function parseGrid(s: string, variant: SudokuVariant = 'classic'): Grid | null {
   const chars = s.replace(/[^0-9.]/g, '');
   if (chars.length !== 81) return null;
-  const g = emptyGrid();
+  const g = emptyGrid(variant);
   for (let i = 0; i < 81; i++) {
     const ch = chars[i];
     if (ch !== '.' && ch !== '0') {
@@ -125,7 +161,7 @@ export function isSolved(g: Grid): boolean {
 /** true if some empty cell has no candidates or a unit misses a digit entirely */
 export function isBroken(g: Grid): boolean {
   for (let i = 0; i < 81; i++) if (g.values[i] === 0 && g.cands[i] === 0) return true;
-  for (const unit of UNITS) {
+  for (const unit of unitsFor(g.variant)) {
     let present = 0;
     for (const cell of unit) {
       present |= g.values[cell] ? bit(g.values[cell]) : g.cands[cell];

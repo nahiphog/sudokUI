@@ -131,6 +131,7 @@ const FINDERS: Partial<Record<Tech, Finder>> = {
 /** Find the next step in HoDoKu order. Never returns BRUTE_FORCE. */
 export function findNextStep(g: Grid, order: Tech[] = SOLVE_ORDER): Step | null {
   for (const tech of order) {
+    if (g.variant === 'diagonal' && TECHS[tech].category === 'Uniqueness') continue;
     const finder = FINDERS[tech];
     if (!finder) continue;
     const step = finder(g);
@@ -149,6 +150,7 @@ export function findNextStep(g: Grid, order: Tech[] = SOLVE_ORDER): Step | null 
 export function findAllSteps(g: Grid, order: Tech[] = SOLVE_ORDER): Step[] {
   const out: Step[] = [];
   for (const tech of order) {
+    if (g.variant === 'diagonal' && TECHS[tech].category === 'Uniqueness') continue;
     const finder = FINDERS[tech];
     if (!finder) continue;
     const step = finder(g);
