@@ -111,12 +111,18 @@ export default function App() {
     (window as any).__sudokuiBooted = true;
     const sharedPosition = new URLSearchParams(window.location.hash.slice(1)).get('s');
     if (sharedPosition && useGame.getState().loadPosition(sharedPosition)) return;
-    const shared = new URLSearchParams(window.location.hash.slice(1)).get('p');
-    if (shared && shared !== useGame.getState().info?.puzzle) {
+    const params = new URLSearchParams(window.location.hash.slice(1));
+    const shared = params.get('p');
+    const variant = params.get('v') === 'diagonal' ? 'diagonal' : 'classic';
+    if (
+      shared &&
+      (shared !== useGame.getState().info?.puzzle ||
+        variant !== (useGame.getState().info?.variant ?? 'classic'))
+    ) {
       const cleaned = shared.replace(/[^0-9.]/g, '');
-      const rating = cleaned.length === 81 ? rateImport(cleaned) : null;
+      const rating = cleaned.length === 81 ? rateImport(cleaned, variant) : null;
       if (rating) {
-        useGame.getState().startGame(cleaned, rating.score, rating.level);
+        useGame.getState().startGame(cleaned, rating.score, rating.level, null, variant);
         return;
       }
     }
@@ -290,6 +296,9 @@ export default function App() {
             {info.practiceTech && (
               <span className="practice-badge">Practice: {TECHS[info.practiceTech].name}</span>
             )}
+            {(info.variant ?? 'classic') === 'diagonal' && (
+              <span className="practice-badge">Diagonal</span>
+            )}
           </div>
         )}
         <div className="topbar-right">
@@ -452,18 +461,18 @@ export default function App() {
       {dialog === 'new' && (
         <NewGameDialog
           onClose={() => setDialog('none')}
-          onStart={(level) => {
+          onStart={(level, variant) => {
             setDialog('none');
-            start({ kind: 'level', level });
+            start({ kind: 'level', level, variant });
           }}
           onDaily={() => {
             setDialog('none');
             startDaily();
           }}
-          onCustom={() => {
+          onCustom={(variant) => {
             setDialog('none');
             setCustomError(null);
-            startCustomEntry();
+            startCustomEntry(variant);
           }}
         />
       )}
